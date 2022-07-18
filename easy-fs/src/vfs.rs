@@ -208,4 +208,110 @@ impl Inode {
         });
         block_cache_sync_all();
     }
+    // inode number
+    // 我们将 DiskInode 的大小设置为 128 字节，每个块正好能够容纳 4 个 DiskInode
+    // 在后续需要支持更多类型的元数据的时候，可以适当缩减直接索引 direct 的块数，
+    // 并将节约出来的空间用来存放其他元数据，仍可保证 DiskInode 的总大小为 128 字节
+    fn inode_id(&self) -> usize {
+        // 将EasyFileSystem中 get_disk_inode_pos函数反过来求inode_id
+        let fs = self.fs.lock();
+        fs.get_disk_inode_id(self.block_id, self.block_offset)
+    }
+
+    fn inode_type(&self) -> usize {
+        self.read_disk_inode(|disk_node| {
+            if disk_node.is_file() {
+                1
+            } else {
+                0
+            }
+        })
+    }
+
+    // 另一个想法是对DiskInode的字段添加一个nlink记录当前的引用数，(注意要保证其大小依然是128)
+    // 然后在获取nlink的时候可以通过inode直接获取，而不用去目录的entry去遍历寻找
+    // 然后在linkat和unlinkat的时候，对当前nlink进行更新
+    fn nlink(&self, inode_id: u32) -> u32 {
+        let _fs = self.fs.lock();
+        let mut nlink = 0_u32;
+        self.read_disk_inode(|disk_inode| {
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            for i in 0..file_count {
+                let mut dirent = DirEntry::empty();
+                assert_eq!(
+                    disk_inode.read_at(
+                        i * DIRENT_SZ,
+                        dirent.as_bytes_mut(),
+                        &self.block_device,
+                    ),
+                    DIRENT_SZ,
+                );
+                if dirent.inode_number() == inode_id {
+                    nlink += 1;
+                }
+            }
+            nlink
+        })
+    }
+
+    // (ino, mode, nlink) 写到一个函数返回
+    pub fn fstat(&self, inode: &Arc<Inode>) -> (usize, usize, u32) {
+        let inode_id = inode.inode_id() as u32;
+        let mode = inode.inode_type();
+        let nlink = self.nlink(inode_id);
+        (inode_id as usize, mode, nlink)
+    }
+
+    //  只在ROOT_INODE下使用的链接
+    pub fn linkat(&self, old: &str, new: &str) {
+        let mut _fs = self.fs.lock();
+        // 这里和create函数类似，但是区别在于要到old name的inode_id, 然后把他给new name
+        let mut new_inode_id = 0;
+        self.modify_disk_inode(|root_inode| {
+            // append file in the dirent
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            // increase size
+            self.increase_size(new_size as u32, root_inode, &mut _fs);
+            // find old name inode id and assign it to new
+            new_inode_id = self.find_inode_id(old, &root_inode).unwrap();
+            // write dirent
+            let dirent = DirEntry::new(new, new_inode_id);
+            root_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        })
+    }
+
+    pub fn unlinkat(&self, name: &str) {
+        let mut _fs = self.fs.lock();
+        // 这里主要是遍历找到name, 并“删除”
+        self.modify_disk_inode(|root_inode| {
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            for i in 0..file_count {
+                let mut dirent = DirEntry::empty();
+                assert_eq!(
+                    root_inode.read_at(
+                        i * DIRENT_SZ,
+                        dirent.as_bytes_mut(),
+                        &self.block_device,
+                    ),
+                    DIRENT_SZ
+                );
+                if dirent.name() == name {
+                    // 写入一个空的entry
+                    let empty_entry = DirEntry::empty();
+                    root_inode.write_at(
+                        DIRENT_SZ * i,
+                        empty_entry.as_bytes(),
+                        &self.block_device,
+                    );
+                    break;
+                }
+            }
+        })
+    }
+
 }

@@ -12,6 +12,11 @@ use super::{
 };
 use crate::BLOCK_SZ;
 
+
+// 实现 easy-fs 的整体磁盘布局，将各段区域及上面的磁盘数据结构结构整合起来就是简易文件系统 EasyFileSystem 的职责
+// 每个布局区域所在的位置，磁盘块的分配和回收也需要经过它才能完成
+// 
+
 /// An easy fs over a block device
 pub struct EasyFileSystem {
     pub block_device: Arc<dyn BlockDevice>,
@@ -133,6 +138,13 @@ impl EasyFileSystem {
         let inodes_per_block = (BLOCK_SZ / inode_size) as u32;
         let block_id = self.inode_area_start_block + inode_id / inodes_per_block;
         (block_id, (inode_id % inodes_per_block) as usize * inode_size)
+    }
+    // Get inode id by block id and block offset
+    pub fn get_disk_inode_id(&self, block_id: usize, block_offset: usize) -> usize {
+        let inode_size = core::mem::size_of::<DiskInode>();
+        let inodes_per_block = BLOCK_SZ / inode_size;
+        let inode_id = (block_id - self.inode_area_start_block as usize) * inodes_per_block + (block_offset / inode_size); 
+        inode_id
     }
     /// Get data block by id
     pub fn get_data_block_id(&self, data_block_id: u32) -> u32 {
