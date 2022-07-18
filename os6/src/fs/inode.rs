@@ -4,7 +4,7 @@ use easy_fs::{
 };
 use crate::drivers::BLOCK_DEVICE;
 use crate::sync::UPSafeCell;
-use alloc::sync::Arc;
+use alloc::{sync::Arc, string::String};
 use lazy_static::*;
 use bitflags::*;
 use alloc::vec::Vec;
@@ -64,6 +64,16 @@ lazy_static! {
         let efs = EasyFileSystem::open(BLOCK_DEVICE.clone());
         Arc::new(EasyFileSystem::root_inode(&efs))
     };
+}
+
+//  linkat
+pub fn linkat(old: &str, new: &str) {
+    ROOT_INODE.linkat(old, new);
+}
+
+// unlinkat
+pub fn unlinkat(name: &str) {
+    ROOT_INODE.unlinkat(name);
 }
 
 /// List all files in the filesystems
@@ -167,26 +177,10 @@ impl File for OSInode {
         total_write_size
     }
 
-    // fn index_node_id(&self) -> usize {
-    //     self.inner.exclusive_access().inode.inode_id()
-    // }
-
-    // fn stat_mode(&self) -> StatMode {
-    //     let t = self.inner.exclusive_access().inode.inode_type();
-    //     match t {
-    //         0 => StatMode::DIR,
-    //         1 => StatMode::FILE,
-    //         _ => StatMode::NULL,
-    //     }
-    // }
-    // fn nlink(&self) -> u32 {
-    //     self.inner.exclusive_access().inode.nlink()
-    // }
     fn fstat(&self) -> (usize, StatMode, u32) {
         let inner = self.inner.exclusive_access();
         let inode = &inner.inode;
         let (ino, type_, nlink) = ROOT_INODE.fstat(inode);
-        drop(inner);
         let mode = match type_ {
             0 => StatMode::DIR,
             1 => StatMode::FILE,

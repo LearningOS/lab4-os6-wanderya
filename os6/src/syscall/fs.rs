@@ -10,6 +10,7 @@ use crate::fs::open_file;
 use crate::fs::OpenFlags;
 use crate::fs::Stat;
 use crate::mm::*;
+use crate::fs::*;
 // use alloc::sync::Arc;
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
@@ -86,33 +87,35 @@ pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
     let pa = translated_va2pa(current_user_token(), va);
     let ptr_st = pa as *mut Stat;
 
-
     let task = current_task().unwrap();
     let inner = task.inner_exclusive_access();
 
     // check if _fd exists.
-    if _fd >= task.inner_exclusive_access().fd_table.len() {
+    if _fd >= inner.fd_table.len() {
         return -1;
     }
-
+    if inner.fd_table[_fd].is_none() {
+        return -1;
+    }
     if let Some(inode) = &inner.fd_table[_fd] {
         // let ino = inode.index_node_id() as u64;
         // let mode = inode.stat_mode();
         // let nlink = inode.nlink();
         // drop(inner); // why error?
         let (ino, mode, nlink) = inode.fstat();
+        drop(inner);
         unsafe {
             // *ptr_st = Stat {
             //     dev: 0,
             //     ino,
             //     mode,
             //     nlink,
+            //     pad: [0; 7]
             // }
             (*ptr_st).dev   = 0;
             (*ptr_st).ino   = ino as u64;
             (*ptr_st).mode  = mode;
             (*ptr_st).nlink = nlink;
-
         }
         0
     } else {
@@ -121,13 +124,22 @@ pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
 }
 
 pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
-    let task = current_task().unwrap();
     let token = current_user_token();
     let old_name = translated_str(token, _old_name);
     let new_name = translated_str(token, _new_name);
-    -1
+    // check if they are the same name 
+    if old_name == new_name {
+        return -1;
+    }
+
+    linkat(old_name.as_str(), new_name.as_str());
+    0
 }
 
 pub fn sys_unlinkat(_name: *const u8) -> isize {
-    -1
+    let token = current_user_token();
+    let name = translated_str(token, _name);
+
+    unlinkat(name.as_str());
+    0
 }
