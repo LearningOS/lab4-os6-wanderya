@@ -208,4 +208,55 @@ impl Inode {
         });
         block_cache_sync_all();
     }
+    // inode number
+    // 我们将 DiskInode 的大小设置为 128 字节，每个块正好能够容纳 4 个 DiskInode
+    // 在后续需要支持更多类型的元数据的时候，可以适当缩减直接索引 direct 的块数，
+    // 并将节约出来的空间用来存放其他元数据，仍可保证 DiskInode 的总大小为 128 字节
+    fn inode_id(&self) -> usize {
+        // 将EasyFileSystem中 get_disk_inode_pos函数反过来求inode_id
+        let fs = self.fs.lock();
+        fs.get_disk_inode_id(self.block_id, self.block_offset)
+    }
+
+    fn inode_type(&self) -> usize {
+        self.read_disk_inode(|disk_node| {
+            if disk_node.is_file() {
+                1
+            } else {
+                0
+            }
+        })
+    }
+
+    fn nlink(&self, inode_id: u32) -> u32 {
+        // let _fs = self.fs.lock();
+        let mut nlink = 0_u32;
+        self.read_disk_inode(|disk_inode| {
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            for i in 0..file_count {
+                let mut dirent = DirEntry::empty();
+                assert_eq!(
+                    disk_inode.read_at(
+                        i * DIRENT_SZ,
+                        dirent.as_bytes_mut(),
+                        &self.block_device,
+                    ),
+                    DIRENT_SZ,
+                );
+                if dirent.inode_number() == inode_id {
+                    nlink += 1;
+                }
+            }
+            nlink
+        })
+    }
+
+    // (ino, mode, nlink) 写到一个函数返回
+    pub fn fstat(&self, inode: &Arc<Inode>) -> (usize, usize, u32) {
+        let ino = inode.inode_id();
+        let mode = inode.inode_type();
+        let nlink = inode.nlink(ino as u32);
+        (ino, mode, nlink)
+    }
+
 }

@@ -15,6 +15,7 @@ pub fn main() -> i32 {
     let fd = fd as usize;
     let stat: Stat = Stat::new();
     let ret = fstat(fd, &stat);
+    // println!("!!!fstat!!! ret = {}, nlink={}", ret, stat.nlink);
     assert_eq!(ret, 0);
     assert_eq!(stat.mode, StatMode::FILE);
     assert_eq!(stat.nlink, 1);
